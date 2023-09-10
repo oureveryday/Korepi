@@ -20,7 +20,7 @@
 ---
 
 ## ✨ Latest Note
-If you are clever enough, you can find where the Korepi Crack is.
+If you are clever enough, you can find where the Korepi C****k is.
 
 ---
 
