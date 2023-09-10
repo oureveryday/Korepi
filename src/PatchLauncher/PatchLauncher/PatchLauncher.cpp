@@ -34,7 +34,7 @@ std::string GetCurrentWorkingDir() {
 
 
 int main(int argc, char** argv) {
-    std::string role = "8";  //Unlock Sponsor Features
+    std::string role = "15";  //Unlock All Features
     
     std::string file = "Baymax64.Ini";
     std::string patcher = "Patch.ex_";
