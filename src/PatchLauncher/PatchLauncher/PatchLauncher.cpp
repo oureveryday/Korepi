@@ -33,10 +33,26 @@ std::string GetCurrentWorkingDir() {
 }
 
 
-int main() {
-    std::string data_string = GetCurrentWorkingDir() + "<@/>1<@/>000000000000000000<@/>Crackkkk";
+int main(int argc, char** argv) {
+    std::string role = "8";  //Unlock Sponsor Features
+    
     std::string file = "Baymax64.Ini";
     std::string patcher = "Patch.ex_";
+    
+    for (int i = 0; i < argc; i++) {
+        std::string arg = argv[i];
+        if (arg == "--role") {
+            if (i + 1 < argc) { 
+                role = argv[++i];
+            }
+            else {
+                std::cerr << "--role [1: Fans, 2: Verified, 4: Translator, 8: Sponsor]" << std::endl;
+                return 1;
+            }
+        }
+    }
+
+    std::string data_string = GetCurrentWorkingDir() + "<@/>" + role + "<@/>000000000000000000<@/>Crackkkk"; 
 
     int size = data_string.size() + 1;
 
