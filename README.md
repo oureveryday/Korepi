@@ -7,5 +7,5 @@ Korepi offline Authtication removed.
 
 ## Usage
 
-Run PatchLauncher.exe and enjoy!
+Run Crack\PatchLauncher.exe and enjoy!
 Don't directly run v0.9.8.4.exe.  
