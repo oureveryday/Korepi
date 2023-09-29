@@ -28,6 +28,13 @@ void Hook(_In_ HANDLE hProcess,
     bpHook->hook();
 }
 
+void memPatch(uintptr_t address,uint32_t value) {
+
+    //usage: memPatch(0x12345678,0xABCD);
+	uint32_t* ptr = reinterpret_cast<uint32_t*>(address); 
+    *ptr = value; 
+}
+
 DWORD __stdcall Thread(LPVOID p)
 {
     std::cout << "[Crack] Loading..." << std::endl;
