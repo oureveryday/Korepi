@@ -1,79 +1,64 @@
 ﻿#include <iostream>
-#include <fstream>
-#include <string>
 #include <windows.h>
 
-void RunExe(const char* cmdline) {
-    STARTUPINFO si = { sizeof(STARTUPINFO) };
+void printError(const char* prefix) {
+    DWORD error = GetLastError();
+    char buffer[256];
+    FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM, NULL, error, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), buffer, sizeof(buffer), NULL);
+    std::cout << prefix << ": " << error << ": " << buffer;
+    system("pause");
+}
+
+const char* exeName = "v1.0.0.1.ex_";
+const char* dllPath = "Crack.dll";
+
+int main() {
+    CHAR exePath[MAX_PATH] = {0};
+    GetModuleFileNameA(NULL, exePath, MAX_PATH);
+    CHAR* lastSlash = strrchr(exePath, '\\');
+    *lastSlash = 0;  // NUL-terminate at the slash
+    strcat_s(exePath, MAX_PATH, "\\");
+    strcat_s(exePath, MAX_PATH, exeName);
+
+    STARTUPINFOA si;
     PROCESS_INFORMATION pi;
+    ZeroMemory(&si, sizeof(si));
+    si.cb = sizeof(si);
 
-    size_t len = strlen(cmdline) + 1;
-    wchar_t* w_cmdline = new wchar_t[len];
-
-    size_t out_len;
-    mbstowcs_s(&out_len, w_cmdline, len, cmdline, len - 1);
-
-    if (CreateProcessW(NULL, w_cmdline, NULL, NULL,
-        FALSE, 0, NULL, NULL, &si, &pi)) {
-        return;
-    }
-    else {
-        std::cout << "Failed to run command " << cmdline << ", error: " << GetLastError() << std::endl;
+    if (!CreateProcessA(NULL, exePath, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
+        printError("Failed to create process");
+        return 1;
     }
 
-    delete[] w_cmdline;
-}
-
-std::string GetCurrentWorkingDir() {
-    char current_dir[MAX_PATH];
-    if (!GetCurrentDirectoryA(MAX_PATH, current_dir)) {
-        std::cerr << "Error getting current directory: #" << GetLastError();
-    }
-    return std::string(current_dir);
-}
-
-
-int main(int argc, char** argv) {
-    std::string role = "15";  //Unlock All Features
-    
-    std::string file = "Baymax64.Ini";
-    std::string patcher = "Patch.ex_";
-    
-    for (int i = 0; i < argc; i++) {
-        std::string arg = argv[i];
-        if (arg == "--role") {
-            if (i + 1 < argc) { 
-                role = argv[++i];
-            }
-            else {
-                std::cerr << "--role [1: Fans, 2: Verified, 4: Translator, 8: Sponsor]" << std::endl;
-                return 1;
-            }
-        }
+    LPVOID allocatedMemory = VirtualAllocEx(pi.hProcess, NULL, strlen(dllPath) + 1, MEM_COMMIT, PAGE_READWRITE);
+    if (!allocatedMemory) {
+        printError("Failed to allocate memory");
+        return 1;
     }
 
-    std::string data_string = GetCurrentWorkingDir() + "<@/>" + role + "<@/>000000000000000000<@/>Crackkkk"; 
-
-    int size = data_string.size() + 1;
-
-    SetFileAttributesA(file.c_str(), FILE_ATTRIBUTE_NORMAL);
-
-    if (std::ifstream(file))
-        std::remove(file.c_str());
-
-    std::ofstream ofs(file);
-    if (!ofs) {
-        std::cout << "Failed to open file\n";
-        return -1;
+    if (!WriteProcessMemory(pi.hProcess, allocatedMemory, dllPath, strlen(dllPath) + 1, NULL)) {
+        printError("Failed to write process memory");
+        return 1;
     }
-    ofs << "[BAYMAX64]" << "\n";
-    ofs << "DATA = " << data_string << "\n";
-    ofs << "SIZE = " << size << "\n";
-    ofs.close();
 
-    SetFileAttributesA(file.c_str(), FILE_ATTRIBUTE_READONLY);
+    LPVOID loadLibraryAddress = (LPVOID)GetProcAddress(GetModuleHandleA("kernel32.dll"), "LoadLibraryA");
+    if (!loadLibraryAddress) {
+        printError("Failed to get LoadLibraryA address");
+        return 1;
+    }
 
-    RunExe(patcher.c_str());
+    HANDLE hThread = CreateRemoteThread(pi.hProcess, NULL, 0, (LPTHREAD_START_ROUTINE)loadLibraryAddress, allocatedMemory, 0, NULL);
+    if (!hThread) {
+        printError("Failed to create remote thread");
+        return 1;
+    }
+
+    WaitForSingleObject(hThread, INFINITE);
+    CloseHandle(hThread);
+
+    VirtualFreeEx(pi.hProcess, allocatedMemory, strlen(dllPath) + 1, MEM_RELEASE);
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
 
     return 0;
 }
