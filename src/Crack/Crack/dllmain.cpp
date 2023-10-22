@@ -6,7 +6,7 @@
 
 #pragma comment(lib, "ntdll.lib")
 
-std::shared_ptr<PLH::BreakPointHook> bpHook;
+//std::shared_ptr<PLH::BreakPointHook> bpHook;
 std::string appendstr = "<@/>1<@/>000000000000000000<@/>Crackkkk";
 
 #pragma region Utils
@@ -148,6 +148,9 @@ void Patch1()
 
 #pragma region CreateRemoteThreadPatch
 
+bool CreateRemoteThreadPatchEnd = false;
+bool CreateRemoteThreadPatchReHook = false;
+
 void HookCreateRemoteThread(_In_ HANDLE hProcess,
     _In_opt_ LPSECURITY_ATTRIBUTES lpThreadAttributes,
     _In_ SIZE_T dwStackSize,
@@ -158,63 +161,143 @@ void HookCreateRemoteThread(_In_ HANDLE hProcess,
 {
     PrintLog("Triggered hook CreateRemoteThread");
     PrintLog(static_cast<const char*>(lpParameter));
+    printf("lpParameter's value is %p \n", lpParameter);
+
     system("pause");
+
 	const char* str = static_cast<const char*>(lpParameter);
-	std::string crkstr = std::string(str) + appendstr;
-	PrintLog("Replaced String.");
-    CreateRemoteThread(hProcess, lpThreadAttributes, dwStackSize, lpStartAddress, (LPVOID)crkstr.c_str(), dwCreationFlags, lpThreadId);
+
+
+	//std::string crkstr = std::string(str) + appendstr;
+	//PrintLog("Replaced String.");
+    CreateRemoteThread(hProcess, lpThreadAttributes, dwStackSize, lpStartAddress, lpParameter, dwCreationFlags, lpThreadId);
 	PrintLog("Patch finished successfully.");
-	
+    //CreateRemoteThreadPatchEnd = true;
+    CreateRemoteThreadPatchReHook = true;
 }
 
 void CreateRemoteThreadPatch()
 {
-    bpHook = std::make_shared<PLH::BreakPointHook>((uint64_t)&CreateRemoteThread, (uint64_t)&HookCreateRemoteThread);
+    auto bpHook = std::make_shared<PLH::BreakPointHook>((uint64_t)&CreateRemoteThread, (uint64_t)&HookCreateRemoteThread);
     bpHook->hook();
 	PrintLog("CreateRemoteThread Hook Success.");
+    while (!CreateRemoteThreadPatchEnd)
+    {
+        if (CreateRemoteThreadPatchReHook)
+        {
+            bpHook->hook();
+            CreateRemoteThreadPatchReHook = false;
+        }
+    }
 }
 #pragma endregion
 
-bool Unpacked = false;
+#pragma region WriteProcessMemoryPatch
 
-void AfterUnpack()
+bool WriteProcessMemoryPatchEnd = false;
+bool WriteProcessMemoryPatchReHook = false;
+int WriteProcessMemoryPatchHookTimes = 1;
+
+void HookWriteProcessMemory(_In_ HANDLE hProcess,
+    _In_ LPVOID lpBaseAddress,
+    _In_reads_bytes_(nSize) LPCVOID lpBuffer,
+    _In_ SIZE_T nSize,
+    _Out_opt_ SIZE_T* lpNumberOfBytesWritten)
 {
-    DisableVMP();
-    Patch1();
-    Unpacked = true;
+    PrintLog("Triggered hook WriteProcessMemory #" + std::to_string(WriteProcessMemoryPatchHookTimes));
+
+    WriteProcessMemoryPatchHookTimes++;
+
+    printf("lpBaseAddress's value is %p \n", lpBaseAddress);
+    std::cout << nSize << std::endl;
+    if (nSize<10000)
+	{
+         BYTE* bytePtr = (BYTE*)lpBuffer;
+
+         printf("Hexadecimal contents of lpBuffer:\n");
+
+         for (SIZE_T i = 0; i < nSize; i++) {
+             printf("%02x ", bytePtr[i]);
+         }
+
+         printf("\n");
+         system("pause");
+     }
+     
+	
+    const char* str = static_cast<const char*>(lpBuffer);
+    WriteProcessMemory(hProcess, lpBaseAddress, lpBuffer, nSize, lpNumberOfBytesWritten);
+    PrintLog("Patch finished successfully.");
+    //WriteProcessMemoryPatchEnd = true;
+    WriteProcessMemoryPatchReHook = true;
+}
+
+void WriteProcessMemoryPatch()
+{
+    auto bpHook = std::make_shared<PLH::BreakPointHook>((uint64_t)&WriteProcessMemory, (uint64_t)&HookWriteProcessMemory);
+    bpHook->hook();
+    PrintLog("WriteProcessMemory Hook Success.");
+    while (!WriteProcessMemoryPatchEnd)
+    {
+	    if (WriteProcessMemoryPatchReHook)
+	    {
+            bpHook->hook();
+            WriteProcessMemoryPatchReHook = false;
+	    }
+    }
+}
+#pragma endregion
+
+#pragma region WaitforExecute
+void QueryPerformanceCounterHook(_Out_ LARGE_INTEGER* lpPerformanceCount)
+{
+    system("pause");
+    QueryPerformanceCounter(lpPerformanceCount);
 }
 
 void WaitforExecute()
 {
-    bpHook = std::make_shared<PLH::BreakPointHook>((uint64_t)&QueryPerformanceCounter, (uint64_t)&QueryPerformanceCounter);
+    auto bpHook = std::make_shared<PLH::BreakPointHook>((uint64_t)&QueryPerformanceCounter, (uint64_t)&QueryPerformanceCounter);
     bpHook->hook();
     while (bpHook->isHooked());
+}
+#pragma endregion
+
+void AfterUnpack()
+{
+    DisableVMP();
+	Patch1();
+    WriteProcessMemoryPatch();
+    CreateRemoteThreadPatch();
 }
 
 #pragma region WaitforUnpack
 
-void HookGetSystemTimeAsFileTime(LPFILETIME lpSystemTimeAsFileTime)
+bool WaitforAfterUnpack = true;
+
+void GetSystemTimeAsFileTimeHook(_Out_ LPFILETIME lpSystemTimeAsFileTime)
 {
-    PrintLog("Program Unpacked.");
-    AfterUnpack();
+    while (WaitforAfterUnpack);
     GetSystemTimeAsFileTime(lpSystemTimeAsFileTime);
 }
 
 void WaitforUnpack()
 {
     PrintLog("Waiting for unpack...");
-    bpHook = std::make_shared<PLH::BreakPointHook>((uint64_t)&GetSystemTimeAsFileTime, (uint64_t)&HookGetSystemTimeAsFileTime);
+    auto bpHook = std::make_shared<PLH::BreakPointHook>((uint64_t)&GetSystemTimeAsFileTime, (uint64_t)&GetSystemTimeAsFileTime);
     bpHook->hook();
-    while (!Unpacked);
+    while (bpHook->isHooked());
+    PrintLog("Program Unpacked.");
+    AfterUnpack();
+    WaitforAfterUnpack = false;
 }
 #pragma endregion
 
 DWORD __stdcall Thread(LPVOID p)
 {
     PrintLog("Crack dll Loaded.");
-    WaitforUnpack();
-
-    //CreateRemoteThreadPatch();
+	WaitforUnpack();
+	 //CreateRemoteThreadPatch();
 	return true;
 }
 
