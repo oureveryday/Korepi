@@ -1,0 +1,5 @@
+﻿  dllmain.cpp
+F:\Genshin\cheat\Crackinfo\Crack\Crack\dllmain.cpp(82,22): warning C4244: “初始化”: 从“unsigned long”转换到“uint8_t”，可能丢失数据
+    正在创建库 F:\Genshin\cheat\Crackinfo\Crack\x64\Release\Crack.lib 和对象 F:\Genshin\cheat\Crackinfo\Crack\x64\Release\Crack.exp
+  LINK : 已指定 /LTCG，但不需要生成代码；从链接命令行中移除 /LTCG 以提高链接器性能
+  Crack.vcxproj -> F:\Genshin\cheat\Crackinfo\Crack\x64\Release\Crack.dll

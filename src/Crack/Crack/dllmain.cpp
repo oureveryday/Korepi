@@ -3,6 +3,8 @@
 #include <Windows.h>
 #include <intrin.h>
 #include <polyhook2/Exceptions/BreakPointHook.hpp>
+#include <nlohmann/json.hpp>
+#include <fifo_map.hpp>
 
 #pragma comment(lib, "ntdll.lib")
 
@@ -118,8 +120,13 @@ void DisableVMP()
 #pragma endregion
 
 #pragma region Patch1
-std::string search1 = "48 89 5C 24 08 48 89 74 24 10 48 89 7C 24 18 55 41 54 41 55 41 56 41 57";
-std::string patch1  = "B0 01 C3 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90";
+
+//48 8B C4 48 89 58 08 48 89 70 10 48 89 78 18 55 41 54 41 55 41 56 41 57 48 8D A8 D8 F8 FF FF  
+std::string search1 = "48 ?? ?? ?? ?? ?? ?? ?? ?? ?? 10 48 89 ?? 18 55 41 54 41 55 41 56 41 57 48 8D A8 D8 F8 FF FF";
+std::string patch1  = "B0 01 C3 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90";
+
+//std::string search1 = "48 89 5C 24 08 48 89 74 24 10 48 89 7C 24 18 55 41 54 41 55 41 56 41 57";
+//std::string patch1  = "B0 01 C3 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90";
 
 void Patch1()
 {
@@ -151,6 +158,10 @@ void Patch1()
 bool CreateRemoteThreadPatchEnd = false;
 bool CreateRemoteThreadPatchReHook = false;
 
+template<class K, class V, class dummy_compare, class A>
+using my_workaround_fifo_map = nlohmann::fifo_map<K, V, nlohmann::fifo_map_compare<K>, A>;
+using my_json = nlohmann::basic_json<my_workaround_fifo_map>;
+
 void HookCreateRemoteThread(_In_ HANDLE hProcess,
     _In_opt_ LPSECURITY_ATTRIBUTES lpThreadAttributes,
     _In_ SIZE_T dwStackSize,
@@ -160,20 +171,47 @@ void HookCreateRemoteThread(_In_ HANDLE hProcess,
     _Out_opt_ LPDWORD lpThreadId)
 {
     PrintLog("Triggered hook CreateRemoteThread");
-    PrintLog(static_cast<const char*>(lpParameter));
-    printf("lpParameter's value is %p \n", lpParameter);
+	std::stringstream ss;
+    ss << lpParameter;
+	std::string addressStr = "0x" + ss.str();
+    PrintLog("lpParameter's value is " + addressStr);
+    
+    BYTE* lpBuffer[900];   //must init the variable
+	ReadProcessMemory(hProcess, lpParameter, &lpBuffer, 900, NULL);
 
-    system("pause");
+    PrintLog("Read memory. Replacing string...");
+    
+    // Assuming addr is the address of the variable
+    uintptr_t addr = reinterpret_cast<uintptr_t>(lpBuffer);
 
-	const char* str = static_cast<const char*>(lpParameter);
+    // Calculate the address of the offset
+    BYTE* offsetAddr = reinterpret_cast<BYTE*>(addr + 60);
+    size_t contentLength = strlen(reinterpret_cast<char*>(offsetAddr));
 
+    // Copy the content at the offset into a string
+    std::string content(reinterpret_cast<char*>(offsetAddr), contentLength);
 
-	//std::string crkstr = std::string(str) + appendstr;
-	//PrintLog("Replaced String.");
+	auto jsondata = my_json::parse(content);
+
+    jsondata["role"] = "15";
+    jsondata["discordId"] = "00000000";
+    jsondata["secret_extra"] = "Crackkkk";
+
+    content = jsondata.dump();
+
+    PrintLog("Replaced string. Writing memory...");
+
+    // Copy the content to the buffer at the offset
+    memcpy(offsetAddr, content.c_str(), content.length());
+    
+    //auto size = content.length() + 60;
+    WriteProcessMemory(hProcess, lpParameter, &lpBuffer, 900, NULL);
+
+	PrintLog("Wrote memory.");
     CreateRemoteThread(hProcess, lpThreadAttributes, dwStackSize, lpStartAddress, lpParameter, dwCreationFlags, lpThreadId);
 	PrintLog("Patch finished successfully.");
-    //CreateRemoteThreadPatchEnd = true;
-    CreateRemoteThreadPatchReHook = true;
+	CreateRemoteThreadPatchEnd = true;
+    CreateRemoteThreadPatchReHook = false;
 }
 
 void CreateRemoteThreadPatch()
@@ -210,19 +248,20 @@ void HookWriteProcessMemory(_In_ HANDLE hProcess,
 
     printf("lpBaseAddress's value is %p \n", lpBaseAddress);
     std::cout << nSize << std::endl;
-    if (nSize<10000)
-	{
-         BYTE* bytePtr = (BYTE*)lpBuffer;
+    BYTE* bytePtr = (BYTE*)lpBuffer;
 
-         printf("Hexadecimal contents of lpBuffer:\n");
+    std::ofstream outputFile("dump.bin", std::ios::binary);
 
-         for (SIZE_T i = 0; i < nSize; i++) {
-             printf("%02x ", bytePtr[i]);
-         }
+    if (outputFile.is_open()) {
+        outputFile.write(reinterpret_cast<char*>(bytePtr), nSize);
+        outputFile.close();
+    }
+    else {
+        std::cout << "Failed to open dump.bin for writing." << std::endl;
+    }
+    PrintLog("Wrote to dump.bin");
 
-         printf("\n");
-         system("pause");
-     }
+    system("pause");
      
 	
     const char* str = static_cast<const char*>(lpBuffer);
@@ -248,6 +287,80 @@ void WriteProcessMemoryPatch()
 }
 #pragma endregion
 
+#pragma region SetEnvironmentVariablePatch
+
+bool SetEnvironmentVariablePatchEnd = false;
+bool SetEnvironmentVariablePatchReHook = false;
+int SetEnvironmentVariablePatchHookTimes = 1;
+
+void HookSetEnvironmentVariable(_In_opt_ LPCWSTR lpName,
+    _Out_writes_to_opt_(nSize, return +1) LPWSTR lpBuffer,
+    _In_ DWORD nSize)
+{
+    PrintLog("Triggered hook SetEnvironmentVariable #" + std::to_string(SetEnvironmentVariablePatchHookTimes));
+
+
+    int bufferSize = WideCharToMultiByte(CP_UTF8, 0, lpBuffer, -1, NULL, 0, NULL, NULL);
+	std::string infostr(bufferSize, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, lpBuffer, -1, &infostr[0], bufferSize, NULL, NULL);
+    PrintLog(infostr);
+    system("pause");
+    SetEnvironmentVariablePatchHookTimes++;
+
+    
+}
+
+void SetEnvironmentVariablePatch()
+{
+    auto bpHook = std::make_shared<PLH::BreakPointHook>((uint64_t)&SetEnvironmentVariable, (uint64_t)&HookSetEnvironmentVariable);
+    bpHook->hook();
+    PrintLog("SetEnvironmentVariable Hook Success.");
+    while (!SetEnvironmentVariablePatchEnd)
+    {
+        if (SetEnvironmentVariablePatchReHook)
+        {
+            bpHook->hook();
+            SetEnvironmentVariablePatchReHook = false;
+        }
+    }
+}
+#pragma endregion
+
+#pragma region VirtualAllocExPatch
+
+bool VirtualAllocExPatchEnd = false;
+bool VirtualAllocExPatchReHook = false;
+
+void HookVirtualAllocEx(_In_opt_ LPVOID lpAddress,
+    _In_ SIZE_T dwSize,
+    _In_ DWORD flAllocationType,
+    _In_ DWORD flProtect)
+{
+    PrintLog("Triggered hook VirtualAllocEx");
+    printf("lpAddress's value is %p \n", lpAddress);
+    
+    system("pause");
+
+    //VirtualAllocExPatchEnd = true;
+    VirtualAllocExPatchReHook = true;
+}
+
+void VirtualAllocExPatch()
+{
+    auto bpHook = std::make_shared<PLH::BreakPointHook>((uint64_t)&VirtualAllocEx, (uint64_t)&HookVirtualAllocEx);
+    bpHook->hook();
+    PrintLog("VirtualAllocEx Hook Success.");
+    while (!VirtualAllocExPatchEnd)
+    {
+        if (VirtualAllocExPatchReHook)
+        {
+            bpHook->hook();
+            VirtualAllocExPatchReHook = false;
+        }
+    }
+}
+#pragma endregion
+
 #pragma region WaitforExecute
 void QueryPerformanceCounterHook(_Out_ LARGE_INTEGER* lpPerformanceCount)
 {
@@ -266,9 +379,10 @@ void WaitforExecute()
 void AfterUnpack()
 {
     DisableVMP();
-	Patch1();
-    WriteProcessMemoryPatch();
+    Patch1();
     CreateRemoteThreadPatch();
+    //std::thread t1(CreateRemoteThreadPatch);
+    //t1.join();
 }
 
 #pragma region WaitforUnpack

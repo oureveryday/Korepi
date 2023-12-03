@@ -9,10 +9,10 @@ void printError(const char* prefix) {
     system("pause");
 }
 
-const char* exeName = "v1.0.0.1.ex_";
+const char* exeName = "v1.1.1.0.ex_";
 const char* dllPath = "Crack.dll";
 
-int main() {
+int main(int argc, char* argv[]) {
     CHAR exePath[MAX_PATH] = {0};
     GetModuleFileNameA(NULL, exePath, MAX_PATH);
     CHAR* lastSlash = strrchr(exePath, '\\');
@@ -25,7 +25,13 @@ int main() {
     ZeroMemory(&si, sizeof(si));
     si.cb = sizeof(si);
 
-    if (!CreateProcessA(NULL, exePath, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
+    std::string commandLine = exePath;
+    for (int i = 1; i < argc; i++) {
+        commandLine += " ";
+        commandLine += argv[i];
+    }
+
+    if (!CreateProcessA(NULL, const_cast<char*>(commandLine.c_str()), NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
         printError("Failed to create process");
         return 1;
     }
