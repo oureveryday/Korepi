@@ -175,22 +175,30 @@ void HookCreateRemoteThread(_In_ HANDLE hProcess,
     ss << lpParameter;
 	std::string addressStr = "0x" + ss.str();
     PrintLog("lpParameter's value is " + addressStr);
-    
-    BYTE* lpBuffer[900];   //must init the variable
-	ReadProcessMemory(hProcess, lpParameter, &lpBuffer, 900, NULL);
+
+    DWORD64* lpParameteraddr = reinterpret_cast<DWORD64*>(lpParameter);
+
+    // Check if the value is what you expect and then change it
+    if (*lpParameteraddr == 0x0000000000000000) {
+        PrintLog("lpParameter is empty, using default value 0x0000000000180000");
+        *lpParameteraddr =  0x0000000000180000;
+    }
+
+	BYTE* lpBuffer[900];   //must init the variable
+	ReadProcessMemory(hProcess, lpParameteraddr, &lpBuffer, 900, NULL);
 
     PrintLog("Read memory. Replacing string...");
-    
+    system("pause");
     // Assuming addr is the address of the variable
     uintptr_t addr = reinterpret_cast<uintptr_t>(lpBuffer);
 
     // Calculate the address of the offset
     BYTE* offsetAddr = reinterpret_cast<BYTE*>(addr + 60);
     size_t contentLength = strlen(reinterpret_cast<char*>(offsetAddr));
-
+    
     // Copy the content at the offset into a string
     std::string content(reinterpret_cast<char*>(offsetAddr), contentLength);
-
+    PrintLog("1...");
 	auto jsondata = my_json::parse(content);
 
     jsondata["role"] = "15";
@@ -205,7 +213,7 @@ void HookCreateRemoteThread(_In_ HANDLE hProcess,
     memcpy(offsetAddr, content.c_str(), content.length());
     
     //auto size = content.length() + 60;
-    WriteProcessMemory(hProcess, lpParameter, &lpBuffer, 900, NULL);
+    WriteProcessMemory(hProcess, lpParameteraddr, &lpBuffer, 900, NULL);
 
 	PrintLog("Wrote memory.");
     CreateRemoteThread(hProcess, lpThreadAttributes, dwStackSize, lpStartAddress, lpParameter, dwCreationFlags, lpThreadId);
@@ -381,6 +389,7 @@ void AfterUnpack()
     DisableVMP();
     Patch1();
     CreateRemoteThreadPatch();
+    //WriteProcessMemoryPatch();
     //std::thread t1(CreateRemoteThreadPatch);
     //t1.join();
 }
