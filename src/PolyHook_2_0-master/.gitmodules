@@ -1,0 +1,9 @@
+[submodule "zydis"]
+	path = zydis
+	url = https://github.com/zyantific/zydis.git
+[submodule "asmjit"]
+	path = asmjit
+	url = https://github.com/asmjit/asmjit.git
+[submodule "asmtk"]
+	path = asmtk
+	url = https://github.com/asmjit/asmtk.git
