@@ -121,9 +121,14 @@ void DisableVMP()
 
 #pragma region Patch1
 
-//48 8B C4 48 89 58 08 48 89 70 10 48 89 78 18 55 41 54 41 55 41 56 41 57 48 8D A8 D8 F8 FF FF  
-std::string search1 = "48 ?? ?? ?? ?? ?? ?? ?? ?? ?? 10 48 89 ?? 18 55 41 54 41 55 41 56 41 57 48 8D A8 D8 F8 FF FF";
+//4.3
+//48 8B C4 48 89 58 08 48 89 70 10 48 89 78 18 55 41 54 41 55 41 56 41 57 48 8D A8 D8 F8 FF FF
+
+//4.4
+//48 8B C4 48 89 58 10 48 89 70 18 48 89 78 20 55 41 54 41 55 41 56 41 57 48 8D A8 D8 FC FF FF
+std::string search1 = "48 ?? ?? ?? ?? ?? ?? ?? ?? ?? 18 48 89 ?? ?? 55 41 54 41 55 41 56 41 57 48 8D A8 D8 ?? FF FF";
 std::string patch1  = "B0 01 C3 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90";
+
 
 //std::string search1 = "48 89 5C 24 08 48 89 74 24 10 48 89 7C 24 18 55 41 54 41 55 41 56 41 57";
 //std::string patch1  = "B0 01 C3 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90";
@@ -175,7 +180,7 @@ void HookCreateRemoteThread(_In_ HANDLE hProcess,
     ss << lpParameter;
 	std::string addressStr = "0x" + ss.str();
     PrintLog("lpParameter's value is " + addressStr);
-
+    //system("pause");
     DWORD64* lpParameteraddr = reinterpret_cast<DWORD64*>(lpParameter);
 
     // Check if the value is what you expect and then change it
@@ -184,11 +189,12 @@ void HookCreateRemoteThread(_In_ HANDLE hProcess,
         *lpParameteraddr =  0x0000000000180000;
     }
 
-	BYTE* lpBuffer[900];   //must init the variable
+	BYTE* lpBuffer[1000];   //must init the variable
 	ReadProcessMemory(hProcess, lpParameteraddr, &lpBuffer, 900, NULL);
 
-    PrintLog("Read memory. Replacing string...");
-    system("pause");
+    PrintLog("Writing string...");
+    
+    //system("pause");
     // Assuming addr is the address of the variable
     uintptr_t addr = reinterpret_cast<uintptr_t>(lpBuffer);
 
@@ -198,14 +204,18 @@ void HookCreateRemoteThread(_In_ HANDLE hProcess,
     
     // Copy the content at the offset into a string
     std::string content(reinterpret_cast<char*>(offsetAddr), contentLength);
-    PrintLog("1...");
-	auto jsondata = my_json::parse(content);
 
-    jsondata["role"] = "15";
+    my_json jsondata;
+
+    jsondata["path"] = std::filesystem::current_path().string();
+    jsondata["role"] = "31";
     jsondata["discordId"] = "00000000";
     jsondata["secret_extra"] = "Crackkkk";
+    jsondata["isEnterDoorLoad"] = "true";
+    
+	content = jsondata.dump();
 
-    content = jsondata.dump();
+    PrintLog(content);
 
     PrintLog("Replaced string. Writing memory...");
 
@@ -213,9 +223,10 @@ void HookCreateRemoteThread(_In_ HANDLE hProcess,
     memcpy(offsetAddr, content.c_str(), content.length());
     
     //auto size = content.length() + 60;
-    WriteProcessMemory(hProcess, lpParameteraddr, &lpBuffer, 900, NULL);
+    WriteProcessMemory(hProcess, lpParameteraddr, &lpBuffer, 1000, NULL);
 
 	PrintLog("Wrote memory.");
+    //system("pause");
     CreateRemoteThread(hProcess, lpThreadAttributes, dwStackSize, lpStartAddress, lpParameter, dwCreationFlags, lpThreadId);
 	PrintLog("Patch finished successfully.");
 	CreateRemoteThreadPatchEnd = true;
