@@ -1,4 +1,5 @@
 ﻿#include <iostream>
+#include <filesystem>
 #include <windows.h>
 
 void printError(const char* prefix) {
@@ -9,10 +10,29 @@ void printError(const char* prefix) {
     system("pause");
 }
 
-const char* exeName = "v1.1.1.0.ex_";
+//const char* exeName = "v1.2.0.1.ex_";
 const char* dllPath = "Crack.dll";
+namespace fs = std::filesystem;
 
 int main(int argc, char* argv[]) {
+
+    std::string exeNamestr;
+    const char* exeName = nullptr;
+    std::string pattern = ".ex_";
+    for (const auto& entry : fs::directory_iterator(fs::current_path())) {
+        if (entry.path().extension() == pattern) {
+        	exeNamestr = entry.path().filename().string();
+            break;
+        }
+    }
+    if (exeNamestr == "") {
+        std::cout << "No .ex_ file found in the current directory. " << std::endl;
+        system("pause");
+        return 1;
+    }
+
+    exeName = exeNamestr.c_str();
+
     CHAR exePath[MAX_PATH] = {0};
     GetModuleFileNameA(NULL, exePath, MAX_PATH);
     CHAR* lastSlash = strrchr(exePath, '\\');
