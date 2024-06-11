@@ -1,5 +1,7 @@
 # Korepi Crack
 
+* Please use <https://github.com/fadillzzz/korepi-tools> for now.
+
 ## Info
 
 (For Animé Gamé v4.2.0)
