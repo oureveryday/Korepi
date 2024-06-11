@@ -23,6 +23,37 @@ void PrintLog(std::string str)
     std::cout << "] " << str << std::endl;
 }
 
+
+typedef HANDLE(WINAPI* CreateRemoteThreadEx_t)(HANDLE, LPSECURITY_ATTRIBUTES, SIZE_T, LPTHREAD_START_ROUTINE, LPVOID,
+    DWORD, LPPROC_THREAD_ATTRIBUTE_LIST, LPDWORD);
+CreateRemoteThreadEx_t oCreateRemoteThreadEx = nullptr;
+
+void inject(HANDLE proc, const std::string dll) {
+    const auto dllAddr = VirtualAllocEx(proc, nullptr, dll.size(), MEM_COMMIT, PAGE_READWRITE);
+
+    if (!dllAddr) {
+        PrintLog("Failed to allocate memory for DLL path");
+        return;
+    }
+
+    if (!WriteProcessMemory(proc, dllAddr, dll.c_str(), dll.size(), nullptr)) {
+        PrintLog("Failed to write DLL path into memory");
+        return;
+    }
+
+    const auto loadLib = GetProcAddress(GetModuleHandle(L"kernel32.dll"), "LoadLibraryA");
+
+    const auto thread =
+        oCreateRemoteThreadEx(proc, nullptr, 0, (PTHREAD_START_ROUTINE)loadLib, dllAddr, 0, nullptr, nullptr);
+
+    if (!thread) {
+        PrintLog("Failed to create remote thread");
+        return;
+    }
+
+    PrintLog("Created remote thread for loading DLL");
+}
+
 uintptr_t PatternScan(LPCSTR pattern)
 {
     static auto pattern_to_byte = [](const char* pattern) {
@@ -50,18 +81,18 @@ uintptr_t PatternScan(LPCSTR pattern)
     auto mod = GetModuleHandle(NULL);
     if (!mod)
         return 0;
-	auto dosHeader = (PIMAGE_DOS_HEADER)mod;
+    auto dosHeader = (PIMAGE_DOS_HEADER)mod;
     auto ntHeaders = (PIMAGE_NT_HEADERS)((std::uint8_t*)mod + dosHeader->e_lfanew);
     auto sizeOfImage = ntHeaders->OptionalHeader.SizeOfImage;
     auto patternBytes = pattern_to_byte(pattern);
     auto scanBytes = reinterpret_cast<std::uint8_t*>(mod);
-	auto s = patternBytes.size();
+    auto s = patternBytes.size();
     auto d = patternBytes.data();
     for (auto i = 0ul; i < sizeOfImage - s; ++i) {
         bool found = true;
         for (auto j = 0ul; j < s; ++j) {
             if (scanBytes[i + j] != d[j] && d[j] != -1) {
-				found = false;
+                found = false;
                 break;
             }
         }
@@ -106,20 +137,29 @@ EXTERN_C NTSTATUS __stdcall NtQuerySection(HANDLE SectionHandle, SECTION_INFORMA
 EXTERN_C NTSTATUS __stdcall NtProtectVirtualMemory(HANDLE ProcessHandle, PVOID* BaseAddress, PULONG  NumberOfBytesToProtect, ULONG NewAccessProtection, PULONG OldAccessProtection);
 EXTERN_C NTSTATUS __stdcall NtPulseEvent(HANDLE EventHandle, PULONG PreviousState);
 
-void DisableVMP()
+void DisableVMPAndWaitForUnpack()
 {
-    // restore hook at NtProtectVirtualMemory
-    auto ntdll = GetModuleHandleA("ntdll.dll");
-    bool linux = GetProcAddress(ntdll, "wine_get_version") != nullptr;
-    void* routine = linux ? (void*)NtPulseEvent : (void*)NtQuerySection;
-    DWORD old;
-    VirtualProtect(NtProtectVirtualMemory, 1, PAGE_EXECUTE_READWRITE, &old);
-    *(uintptr_t*)NtProtectVirtualMemory = *(uintptr_t*)routine & ~(0xFFui64 << 32) | (uintptr_t)(*(uint32_t*)((uintptr_t)routine + 4) - 1) << 32;
-    VirtualProtect(NtProtectVirtualMemory, 1, old, &old);
+    const auto ntdll = GetModuleHandle(L"ntdll.dll");
+    uint8_t callcode = ((uint8_t*)GetProcAddress(ntdll, "NtQuerySection"))[4] - 1;
+    uint8_t restore[] = { 0x4C, 0x8B, 0xD1, 0xB8, callcode };
+
+    volatile auto ntProtectVirtualMemory = (uint8_t*)GetProcAddress(ntdll, "NtProtectVirtualMemory");
+
+    while (true) {
+        if (ntProtectVirtualMemory[0] != 0x4C) {
+            DWORD oldProtect;
+            VirtualProtect((LPVOID)ntProtectVirtualMemory, sizeof(restore), PAGE_EXECUTE_READWRITE, &oldProtect);
+            memcpy(ntProtectVirtualMemory, restore, sizeof(restore));
+            VirtualProtect((LPVOID)ntProtectVirtualMemory, sizeof(restore), oldProtect, nullptr);
+
+            break;
+        }
+    }
 }
 #pragma endregion
 
 #pragma region Patch1
+//48 8B C4 48 89 58 ?? ?? ?? 70 ?? 48 89 78 ?? 55 41 54 41 55 41 56 41 57 48 8D A8 D8 ?? FF FF
 
 //4.3
 //48 8B C4 48 89 58 08 48 89 70 10 48 89 78 18 55 41 54 41 55 41 56 41 57 48 8D A8 D8 F8 FF FF
@@ -127,11 +167,10 @@ void DisableVMP()
 //4.4
 //48 8B C4 48 89 58 10 48 89 70 18 48 89 78 20 55 41 54 41 55 41 56 41 57 48 8D A8 D8 FC FF FF
 
-//4.4.1
-//48 8B C4 48 89 58 10 48 89 70 18 48 89 78 20 55 41 54 41 55 41 56 41 57 48 8D A8 08 FD FF FF
-
-std::string search1 = "48 ?? ?? ?? ?? ?? 10 ?? ?? ?? 18 48 89 ?? ?? 55 41 54 41 55 41 56 41 57 48 8D A8 08 ?? FF FF";
-std::string patch1  = "B0 01 C3 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90";
+//4.6
+//48 ?? ?? ?? ?? ?? ?? ?? ?? ?? ?? 48 89 ?? ?? 55 41 54 41 55 41 56 41 57 48 8D A8 D8 ?? FF FF
+std::string search1 = "48 ?? ?? ?? ?? ?? ?? ?? ?? ?? 18 48 89 ?? ?? 55 41 54 41 55 41 56 41 57 48 8D A8 D8 ?? FF FF";
+std::string patch1 = "B0 01 C3 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90 90";
 
 
 //std::string search1 = "48 89 5C 24 08 48 89 74 24 10 48 89 7C 24 18 55 41 54 41 55 41 56 41 57";
@@ -144,7 +183,7 @@ void Patch1()
     auto addr = PatternScan(search1.c_str());
     std::stringstream addrss;
     addrss << std::hex << addr;
-	std::string addrStr = addrss.str();
+    std::string addrStr = addrss.str();
 
     if (addr == 0)
     {
@@ -180,9 +219,9 @@ void HookCreateRemoteThread(_In_ HANDLE hProcess,
     _Out_opt_ LPDWORD lpThreadId)
 {
     PrintLog("Triggered hook CreateRemoteThread");
-	std::stringstream ss;
+    std::stringstream ss;
     ss << lpParameter;
-	std::string addressStr = "0x" + ss.str();
+    std::string addressStr = "0x" + ss.str();
     PrintLog("lpParameter's value is " + addressStr);
     //system("pause");
     DWORD64* lpParameteraddr = reinterpret_cast<DWORD64*>(lpParameter);
@@ -190,14 +229,14 @@ void HookCreateRemoteThread(_In_ HANDLE hProcess,
     // Check if the value is what you expect and then change it
     if (*lpParameteraddr == 0x0000000000000000) {
         PrintLog("lpParameter is empty, using default value 0x0000000000180000");
-        *lpParameteraddr =  0x0000000000180000;
+        *lpParameteraddr = 0x0000000000180000;
     }
 
-	BYTE* lpBuffer[1000];   //must init the variable
-	ReadProcessMemory(hProcess, lpParameteraddr, &lpBuffer, 900, NULL);
+    BYTE* lpBuffer[1000];   //must init the variable
+    ReadProcessMemory(hProcess, lpParameteraddr, &lpBuffer, 900, NULL);
 
     PrintLog("Writing string...");
-    
+
     //system("pause");
     // Assuming addr is the address of the variable
     uintptr_t addr = reinterpret_cast<uintptr_t>(lpBuffer);
@@ -205,7 +244,7 @@ void HookCreateRemoteThread(_In_ HANDLE hProcess,
     // Calculate the address of the offset
     BYTE* offsetAddr = reinterpret_cast<BYTE*>(addr + 60);
     size_t contentLength = strlen(reinterpret_cast<char*>(offsetAddr));
-    
+
     // Copy the content at the offset into a string
     std::string content(reinterpret_cast<char*>(offsetAddr), contentLength);
 
@@ -216,8 +255,11 @@ void HookCreateRemoteThread(_In_ HANDLE hProcess,
     jsondata["discordId"] = "00000000";
     jsondata["secret_extra"] = "Crackkkk";
     jsondata["isEnterDoorLoad"] = "true";
-    
-	content = jsondata.dump();
+    jsondata["dataId"] = "44262:mokPVuACUwR5Qw==";
+    jsondata["hwid"] = "---------Hi-Korepi-Devs---------:---------Hi-Korepi-Devs---------";
+
+
+    content = jsondata.dump();
 
     PrintLog(content);
 
@@ -225,15 +267,22 @@ void HookCreateRemoteThread(_In_ HANDLE hProcess,
 
     // Copy the content to the buffer at the offset
     memcpy(offsetAddr, content.c_str(), content.length());
-    
+
     //auto size = content.length() + 60;
     WriteProcessMemory(hProcess, lpParameteraddr, &lpBuffer, 1000, NULL);
 
-	PrintLog("Wrote memory.");
+    PrintLog("Wrote memory.");
+
+    if ((int64_t)hProcess != -1) {
+        const auto path = std::filesystem::current_path() / "dll.dll";
+        inject(hProcess, path.string());
+    }
+
+    PrintLog("Injected Crack dll.");
     //system("pause");
     CreateRemoteThread(hProcess, lpThreadAttributes, dwStackSize, lpStartAddress, lpParameter, dwCreationFlags, lpThreadId);
-	PrintLog("Patch finished successfully.");
-	CreateRemoteThreadPatchEnd = true;
+    PrintLog("Patch finished successfully.");
+    CreateRemoteThreadPatchEnd = true;
     CreateRemoteThreadPatchReHook = false;
 }
 
@@ -241,7 +290,7 @@ void CreateRemoteThreadPatch()
 {
     auto bpHook = std::make_shared<PLH::BreakPointHook>((uint64_t)&CreateRemoteThread, (uint64_t)&HookCreateRemoteThread);
     bpHook->hook();
-	PrintLog("CreateRemoteThread Hook Success.");
+    PrintLog("CreateRemoteThread Hook Success.");
     while (!CreateRemoteThreadPatchEnd)
     {
         if (CreateRemoteThreadPatchReHook)
@@ -285,8 +334,8 @@ void HookWriteProcessMemory(_In_ HANDLE hProcess,
     PrintLog("Wrote to dump.bin");
 
     system("pause");
-     
-	
+
+
     const char* str = static_cast<const char*>(lpBuffer);
     WriteProcessMemory(hProcess, lpBaseAddress, lpBuffer, nSize, lpNumberOfBytesWritten);
     PrintLog("Patch finished successfully.");
@@ -301,11 +350,11 @@ void WriteProcessMemoryPatch()
     PrintLog("WriteProcessMemory Hook Success.");
     while (!WriteProcessMemoryPatchEnd)
     {
-	    if (WriteProcessMemoryPatchReHook)
-	    {
+        if (WriteProcessMemoryPatchReHook)
+        {
             bpHook->hook();
             WriteProcessMemoryPatchReHook = false;
-	    }
+        }
     }
 }
 #pragma endregion
@@ -324,13 +373,13 @@ void HookSetEnvironmentVariable(_In_opt_ LPCWSTR lpName,
 
 
     int bufferSize = WideCharToMultiByte(CP_UTF8, 0, lpBuffer, -1, NULL, 0, NULL, NULL);
-	std::string infostr(bufferSize, '\0');
+    std::string infostr(bufferSize, '\0');
     WideCharToMultiByte(CP_UTF8, 0, lpBuffer, -1, &infostr[0], bufferSize, NULL, NULL);
     PrintLog(infostr);
     system("pause");
     SetEnvironmentVariablePatchHookTimes++;
 
-    
+
 }
 
 void SetEnvironmentVariablePatch()
@@ -361,7 +410,7 @@ void HookVirtualAllocEx(_In_opt_ LPVOID lpAddress,
 {
     PrintLog("Triggered hook VirtualAllocEx");
     printf("lpAddress's value is %p \n", lpAddress);
-    
+
     system("pause");
 
     //VirtualAllocExPatchEnd = true;
@@ -385,7 +434,7 @@ void VirtualAllocExPatch()
 #pragma endregion
 
 #pragma region WaitforExecute
-void QueryPerformanceCounterHook(_Out_ LARGE_INTEGER* lpPerformanceCount)
+void QueryPerformanceCounterHook(_Out_ LARGE_INTEGER * lpPerformanceCount)
 {
     system("pause");
     QueryPerformanceCounter(lpPerformanceCount);
@@ -401,7 +450,6 @@ void WaitforExecute()
 
 void AfterUnpack()
 {
-    DisableVMP();
     Patch1();
     CreateRemoteThreadPatch();
     //WriteProcessMemoryPatch();
@@ -415,16 +463,16 @@ bool WaitforAfterUnpack = true;
 
 void GetSystemTimeAsFileTimeHook(_Out_ LPFILETIME lpSystemTimeAsFileTime)
 {
-    while (WaitforAfterUnpack);
+    system("pause");
     GetSystemTimeAsFileTime(lpSystemTimeAsFileTime);
 }
 
 void WaitforUnpack()
 {
     PrintLog("Waiting for unpack...");
-    auto bpHook = std::make_shared<PLH::BreakPointHook>((uint64_t)&GetSystemTimeAsFileTime, (uint64_t)&GetSystemTimeAsFileTime);
+    DisableVMPAndWaitForUnpack();
+    auto bpHook = std::make_shared<PLH::BreakPointHook>((uint64_t)&GetSystemTimeAsFileTime, (uint64_t)&GetSystemTimeAsFileTimeHook);
     bpHook->hook();
-    while (bpHook->isHooked());
     PrintLog("Program Unpacked.");
     AfterUnpack();
     WaitforAfterUnpack = false;
@@ -434,15 +482,15 @@ void WaitforUnpack()
 DWORD __stdcall Thread(LPVOID p)
 {
     PrintLog("Crack dll Loaded.");
-	WaitforUnpack();
-	 //CreateRemoteThreadPatch();
-	return true;
+    WaitforUnpack();
+    //CreateRemoteThreadPatch();
+    return true;
 }
 
-BOOL APIENTRY DllMain( HMODULE hModule,
-                       DWORD  ul_reason_for_call,
-                       LPVOID lpReserved
-                     )
+BOOL APIENTRY DllMain(HMODULE hModule,
+    DWORD  ul_reason_for_call,
+    LPVOID lpReserved
+)
 {
     if (hModule)
         DisableThreadLibraryCalls(hModule);

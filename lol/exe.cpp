@@ -1,4 +1,4 @@
-#define WIN32_LEAN_AND_MEAN
+﻿#define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
 
 #include <cstdint>
@@ -20,7 +20,8 @@ char **hwid(char **ret) {
     return ret;
 }
 
-bool fakeResp = true;
+bool fakeResp = false;
+bool fakeRespVerInfo = false;
 
 typedef void (*options_t)(void *, size_t, void *);
 options_t oOptions = nullptr;
@@ -30,13 +31,48 @@ void options(void *a1, size_t a2, void *a3) {
         if (memcmp(a3, "https://md5c.", 13) == 0) {
             fakeResp = true;
         }
+        if (memcmp(a3, "https://ghp.535888", 18) == 0) {
+            fakeRespVerInfo = true;
+        }
     }
-
-    oOptions(a1, a2, a3);
+	oOptions(a1, a2, a3);
 }
 
 typedef size_t (*respHandler_t)(void *, char *, size_t, uint64_t *, uint32_t *a5);
 respHandler_t oRespHandler = nullptr;
+
+const auto versionInfoResp = R"|({
+    "msg": "success",
+    "code": 200,
+    "data": {
+        "latest_version": "1.3.1.3",
+        "update_required": true,
+        "update_url": "https://github.com/Cotton-Buds/calculator/releases",
+        "announcement": "4.6 os&cn",
+        "updated_by": "Cracked",
+        "updated_at": "1337",
+        "update_diff": {
+            "added_features": [
+                "Cracked",
+                "Cracked"
+            ],
+            "deleted_features": [
+                "Cracked",
+                "Cracked"
+            ],
+            "total_size": "1337"
+        },
+        "compatible_versions": [
+            "none"
+        ]
+    },
+    "sign2": "V4XAGPDh0GCOquiQyLUsTE90voX23qkYZbwc+Pa0qhMAWtKxYozxA/aE0U6BcXk502nZSrtHAXLh3ucIDFUuNX/T9uR+NpJmOirHbAJcH6z/xpzxywCVoGaFdchQ64A0RcxphpTI4bCeCr4mgXYXbIdGWd7+y6hpQ1qGcn9en0Oh9ULG11nL4iC0c4tK6N0zQLYSxmz8dOrhwg4CIkcRxx7Yht+1w/PEo0rR0GkKN3mONibiow2Bv8oSvev4vc0xvNZQ2gdPYzNxfg6ueCv4MXLDffzJ0nCrl8+xVwQs4mYLTYsovfBB/41kNbBoYGbzyTS+HesxTqsuDpU+1/oByg=="
+}
+)|";
+const auto versionInfoChunkLength = std::format("{:x}", strlen(versionInfoResp));
+const auto versionInfoFirstChunk = std::format("{}\r\n{}\r\n", versionInfoChunkLength, versionInfoResp);
+const auto versionInfoSecondChunk = std::format("0\r\n\r\n");
+const auto versionInfoAggregated = versionInfoFirstChunk + versionInfoSecondChunk;
 
 const auto resp = R"({
     "msg": "Hi there",
@@ -69,10 +105,17 @@ const auto secondChunk = std::format("0\r\n\r\n");
 const auto aggregated = firstChunk + secondChunk;
 
 size_t respHandler(void *a1, char *content, size_t length, uint64_t *a4, uint32_t *a5) {
+    
     if (fakeResp == true) {
         fakeResp = false;
         memcpy(content, aggregated.c_str(), aggregated.size() + 1);
         length = aggregated.size();
+    }
+    
+    if (fakeRespVerInfo == true) {
+        fakeRespVerInfo = false;
+        memcpy(content, versionInfoAggregated.c_str(), versionInfoAggregated.size() + 1);
+        length = versionInfoAggregated.size();
     }
 
     return oRespHandler(a1, content, length, a4, a5);

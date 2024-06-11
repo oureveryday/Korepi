@@ -1,6 +1,7 @@
 ﻿#include <iostream>
 #include <filesystem>
 #include <windows.h>
+#include <codecvt>
 
 void printError(const char* prefix) {
     DWORD error = GetLastError();
@@ -10,13 +11,40 @@ void printError(const char* prefix) {
     system("pause");
 }
 
-//const char* exeName = "v1.2.0.1.ex_";
-const char* dllPath = "Crack.dll";
+void inject(HANDLE proc, const std::string dll) {
+    const auto dllAddr = VirtualAllocEx(proc, nullptr, dll.size(), MEM_COMMIT, PAGE_READWRITE);
+
+    if (!dllAddr) {
+        printError("Failed to allocate memory for DLL path");
+        return;
+    }
+
+    if (!WriteProcessMemory(proc, dllAddr, dll.c_str(), dll.size(), nullptr)) {
+        printError("Failed to write DLL path into memory");
+        return;
+    }
+
+    const auto loadLib = GetProcAddress(GetModuleHandle(L"kernel32.dll"), "LoadLibraryA");
+
+    const auto thread =
+        CreateRemoteThreadEx(proc, nullptr, 0, (PTHREAD_START_ROUTINE)loadLib, dllAddr, 0, nullptr, nullptr);
+
+    if (!thread) {
+        printError("Failed to create remote thread");
+        return;
+    }
+
+    std::cout << "Created remote thread for loading DLL" << std::endl;
+}
+
+
+std::string exeNamestr = "korepi.exe";
 namespace fs = std::filesystem;
 
 int main(int argc, char* argv[]) {
 
-    std::string exeNamestr;
+	/*
+	std::string exeNamestr;
     const char* exeName = nullptr;
     std::string pattern = ".ex_";
     for (const auto& entry : fs::directory_iterator(fs::current_path())) {
@@ -30,61 +58,44 @@ int main(int argc, char* argv[]) {
         system("pause");
         return 1;
     }
-
     exeName = exeNamestr.c_str();
-
     CHAR exePath[MAX_PATH] = {0};
     GetModuleFileNameA(NULL, exePath, MAX_PATH);
     CHAR* lastSlash = strrchr(exePath, '\\');
     *lastSlash = 0;  // NUL-terminate at the slash
     strcat_s(exePath, MAX_PATH, "\\");
     strcat_s(exePath, MAX_PATH, exeName);
+    */
 
-    STARTUPINFOA si;
-    PROCESS_INFORMATION pi;
-    ZeroMemory(&si, sizeof(si));
-    si.cb = sizeof(si);
-
-    std::string commandLine = exePath;
+	std::string commandLine;
     for (int i = 1; i < argc; i++) {
         commandLine += " ";
         commandLine += argv[i];
     }
 
-    if (!CreateProcessA(NULL, const_cast<char*>(commandLine.c_str()), NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
-        printError("Failed to create process");
-        return 1;
+    
+    std::wstring exeNamestrL = std::wstring(exeNamestr.begin(), exeNamestr.end());
+    std::wstring commandLineL = std::wstring(commandLine.begin(), commandLine.end());
+
+    SHELLEXECUTEINFO shExecInfo = { 0 };
+    shExecInfo.cbSize = sizeof(SHELLEXECUTEINFO);
+    shExecInfo.fMask = SEE_MASK_NOCLOSEPROCESS;
+	shExecInfo.lpFile = exeNamestrL.c_str();
+	shExecInfo.lpDirectory = NULL;
+    shExecInfo.nShow = SW_SHOWNORMAL;
+	shExecInfo.lpParameters = commandLineL.c_str();
+        
+
+    if (!ShellExecuteEx(&shExecInfo)) {
+        printError("Failed to start korepi exe");
+    }
+    else {
+        const std::string dll = (std::filesystem::current_path() / "Crack.dll").string();
+
+        inject(shExecInfo.hProcess, dll);
+
+        CloseHandle(shExecInfo.hProcess);
     }
 
-    LPVOID allocatedMemory = VirtualAllocEx(pi.hProcess, NULL, strlen(dllPath) + 1, MEM_COMMIT, PAGE_READWRITE);
-    if (!allocatedMemory) {
-        printError("Failed to allocate memory");
-        return 1;
-    }
-
-    if (!WriteProcessMemory(pi.hProcess, allocatedMemory, dllPath, strlen(dllPath) + 1, NULL)) {
-        printError("Failed to write process memory");
-        return 1;
-    }
-
-    LPVOID loadLibraryAddress = (LPVOID)GetProcAddress(GetModuleHandleA("kernel32.dll"), "LoadLibraryA");
-    if (!loadLibraryAddress) {
-        printError("Failed to get LoadLibraryA address");
-        return 1;
-    }
-
-    HANDLE hThread = CreateRemoteThread(pi.hProcess, NULL, 0, (LPTHREAD_START_ROUTINE)loadLibraryAddress, allocatedMemory, 0, NULL);
-    if (!hThread) {
-        printError("Failed to create remote thread");
-        return 1;
-    }
-
-    WaitForSingleObject(hThread, INFINITE);
-    CloseHandle(hThread);
-
-    VirtualFreeEx(pi.hProcess, allocatedMemory, strlen(dllPath) + 1, MEM_RELEASE);
-    CloseHandle(pi.hProcess);
-    CloseHandle(pi.hThread);
-
-    return 0;
+	return 0;
 }
