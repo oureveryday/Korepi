@@ -9,15 +9,13 @@
 #include "MinHook.h"
 #include "Sig.hpp"
 
-typedef char **(*hwid_t)(char **);
+typedef char** (*hwid_t)(char **);
 hwid_t oHwid = nullptr;
-
-char **hwid(char **ret) {
-    oHwid(ret);
+char **hwid(char **hwid_out) {
+    auto result = oHwid(hwid_out);
     const auto s = std::string("---------Hi-Korepi-Devs---------");
-    memcpy(*ret, s.c_str(), s.size() + 1);
-
-    return ret;
+    memcpy(*hwid_out, s.c_str(), s.size() + 1);
+    return result;
 }
 
 bool fakeResp = false;
@@ -35,38 +33,36 @@ void options(void *a1, size_t a2, void *a3) {
             fakeRespVerInfo = true;
         }
     }
-	oOptions(a1, a2, a3);
-}
 
-typedef size_t (*respHandler_t)(void *, char *, size_t, uint64_t *, uint32_t *a5);
-respHandler_t oRespHandler = nullptr;
+    oOptions(a1, a2, a3);
+}
 
 const auto versionInfoResp = R"|({
     "msg": "success",
     "code": 200,
     "data": {
-        "latest_version": "1.3.1.3",
-        "update_required": true,
-        "update_url": "https://github.com/Cotton-Buds/calculator/releases",
-        "announcement": "4.6 os&cn",
+        "latest_version": "1.3.2.0",
+        "update_required": false,
+        "update_url": "https://github.com/oureveryday/Korepi/releases",
+        "announcement": "4.7 os&cn",
         "updated_by": "Cracked",
         "updated_at": "1337",
         "update_diff": {
             "added_features": [
-                "Cracked",
-                "Cracked"
+                "1337",
+                "1337"
             ],
             "deleted_features": [
-                "Cracked",
-                "Cracked"
+                "1337",
+                "1337"
             ],
-            "total_size": "1337"
+            "total_size": "124 MB"
         },
         "compatible_versions": [
             "none"
         ]
     },
-    "sign2": "V4XAGPDh0GCOquiQyLUsTE90voX23qkYZbwc+Pa0qhMAWtKxYozxA/aE0U6BcXk502nZSrtHAXLh3ucIDFUuNX/T9uR+NpJmOirHbAJcH6z/xpzxywCVoGaFdchQ64A0RcxphpTI4bCeCr4mgXYXbIdGWd7+y6hpQ1qGcn9en0Oh9ULG11nL4iC0c4tK6N0zQLYSxmz8dOrhwg4CIkcRxx7Yht+1w/PEo0rR0GkKN3mONibiow2Bv8oSvev4vc0xvNZQ2gdPYzNxfg6ueCv4MXLDffzJ0nCrl8+xVwQs4mYLTYsovfBB/41kNbBoYGbzyTS+HesxTqsuDpU+1/oByg=="
+    "sign2": "CCDPv7klKvXwkImpFaE+WfSJxrijj4nKHH5sSOQke2rdEpd+jCkiPMU24HCulrEtEfBQEUF2H7vBAQCbb5C8za5//+b77ccfumA63fFuie9WbeLhAIyq6t+UGpu5Ecfh6iLSNyPFZANTyjs3Cn5uXoiBPKgbczCMVN2fy80uUgVqaGYznWlD6zJYla/oPmuAewnd4AHv0kidNUPu9JQI2d++9+Un+GKbsKveN2LjEsc+SdCUtHCadMuJXcMx8lMCfUkORy6q7md2HcvNBc5EZQHQ+xvBy4GHa6qYs6pOfpdZP25ixuiaYtuLyf9572Fg1R3HS3lueFbhAyKDFvn4VA=="
 }
 )|";
 const auto versionInfoChunkLength = std::format("{:x}", strlen(versionInfoResp));
@@ -74,44 +70,25 @@ const auto versionInfoFirstChunk = std::format("{}\r\n{}\r\n", versionInfoChunkL
 const auto versionInfoSecondChunk = std::format("0\r\n\r\n");
 const auto versionInfoAggregated = versionInfoFirstChunk + versionInfoSecondChunk;
 
-const auto resp = R"({
-    "msg": "Hi there",
-    "code": 200,
-    "data": {
-        "createBy": null,
-        "createTime": "2024-05-25T14:06:09.662Z",
-        "updateBy": "anonymousUser",
-        "updateTime": "2024-05-25T14:06:09.662Z",
-        "delFlag": 0,
-        "remark": "Oops!",
-        "id": 44262,
-        "roleValue": 25,
-        "cardKey": null,
-        "expiryTime": "2038-01-19T03:14:07.000Z",
-        "lastLoginTime": "2024-05-25T14:06:09.662Z",
-        "hwid": "---------Hi-Korepi-Devs---------",
-        "fileMd5": "mokPVuACUwR5Qw==",
-        "resetTime": null,
-        "resetNum": 4,
-        "pauseTime": null,
-        "status": 0
-    },
-    "signature": "a5879201e7fb4e3064390fccb0d8bbcf628c70bb237843101f314710ebfa0adc",
-    "sign2": "coUVZrl9x43Dql30LoOOpp/U7+gVb7298CeYu6uu8gT1RRxsf4jvyz/xQckiDWd5Sj43dl5AAzdmJGPPFtyQC3haU20H6v09C6whJqSwHDuizT+SW7VFZbWT3jhc+y1bgkYEhbyxHK9hkTGF8hlMk6HSkhAg1vl8t/E7ZcScmh22ZRYXMRijZEEPCgNbDTXDwySqdRnEaLc17z4uvGG/+B2C/60T4aH4VFnFjDyCuIlxCOgMOUM3QcXj0KZakmHxddURpAULfBi00LCamJlJIeUFbnlg3vcrNoCxD/jpHmdZn0jr30jXpgljhAb5AxsX1xwdF5wYROiJTWv6U6nm0A=="
-})";
+
+typedef size_t (*respHandler_t)(void *, char *, size_t, uint64_t *, uint32_t *a5);
+respHandler_t oRespHandler = nullptr;
+const auto resp =
+    R"({"msg": "vpJSftgQ2noDAZR3Iri/ForvdhDZvxwlJCXowV9TgKSs+BoMyBMOIuxjpDcMTSov1thaXhg/d9aAKcpxOP6glQ3bSd8bHIGMku3Ck/33VdYhtzx4HwC4Lel5mVGZ9+2jffsIgHyIwxMl+8kYwh/QGQRlkC8zFfyNaMszsZiOxIJCy/RMYfI3buvCDPH/4D1/VxysPnaX+QtrVrs7Bt74byqnd38bi0GhpllEWL7CO+7fI+vMe2OSv6s0CUaOqzhDC5N8wIkHsthyVyP+GYoltTov3Bu5iaxmgZc/eYQPTkTWQ759pIVNjKJwnQI3EtOEdrRog6LAkA/CMGwMwBkScvY508Z3KhnNqqIIF9RpYLI6rdST+o2t5gIK4sElQg/2wHZT6wSm23t7YdxnwzEFZysv/H0y63iI4NMUmyZIkRvCyxlWVMpTt/rV9qubdbCjGDxG7A/0LbxCJBfBgEWu4Krpp1S+hk4qgIB+2apCh5sxU76mLzQdFLzNrgmbQADapyDO6rWw777F9FKlo/r9II8kISi/+2FxXp7TZE3ALbcyUo7zKucahsq7u9ucENm64D3PKV4YZCHchQY7xyYI4DaC1PQzleJxGaGbCoBQ0PZK7f33d3N3qB10OaEfe2de4uTcOKbVAjtjSLrlZcMGiZd40Bho76xCtcgAKG2FDxbH/PJo4BoIYwqiDzqpmxXBOsn0JqKLGLaAyU840GAgyLO62lE7/A26w+B9q7hkOIcKlfXZpdwjsll/dADe2U/uF5nrLxEOUGDx9gbUoB95KLD1S3KCCyaLuv8j4imt2E9EgDzk/1XdIwnbPGAECajV5z4yTpMuyD9XBhmJQIFutw==", "code": 200})";
 const auto chunkLength = std::format("{:x}", strlen(resp));
 const auto firstChunk = std::format("{}\r\n{}\r\n", chunkLength, resp);
 const auto secondChunk = std::format("0\r\n\r\n");
 const auto aggregated = firstChunk + secondChunk;
 
+bool doneMagic = false;
+
 size_t respHandler(void *a1, char *content, size_t length, uint64_t *a4, uint32_t *a5) {
-    
     if (fakeResp == true) {
         fakeResp = false;
         memcpy(content, aggregated.c_str(), aggregated.size() + 1);
         length = aggregated.size();
+        doneMagic = true;
     }
-    
     if (fakeRespVerInfo == true) {
         fakeRespVerInfo = false;
         memcpy(content, versionInfoAggregated.c_str(), versionInfoAggregated.size() + 1);
@@ -190,9 +167,7 @@ void start() {
     const auto size = nt->OptionalHeader.SizeOfImage;
 
     {
-        const void *found = Sig::find(
-            exe, size,
-            "48 89 5C 24 10 48 89 74 24 18 48 89 7C 24 20 55 41 54 41 55 41 56 41 57 48 8D 6C 24 C9 48 81 EC C0");
+        const void *found = Sig::find(exe, size, "48 89 5C 24 10 48 89 7C 24 18 55 48 8D 6C");
 
         if (found != nullptr) {
             MH_CreateHook((LPVOID)found, hwid, (LPVOID *)&oHwid);
@@ -217,6 +192,13 @@ void start() {
             MH_EnableHook((LPVOID)found);
         }
     }
+
+    while (doneMagic == false) {
+        Sleep(1);
+    }
+
+    MH_DisableHook(MH_ALL_HOOKS);
+    MH_RemoveHook(MH_ALL_HOOKS);
 
     {
         const auto remoteThreadEx = GetProcAddress(GetModuleHandle(L"kernel32.dll"), "CreateRemoteThreadEx");
