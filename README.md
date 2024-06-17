@@ -5,7 +5,7 @@
 
 ## Info
 
-(For Animé Gamé v4.6.0)
+(For Animé Gamé v4.7.0)
 (Mod from https://github.com/fadillzzz/korepi-tools)
 
 Korepi offline Authtication removed.
@@ -18,7 +18,7 @@ Korepi offline Authtication removed.
 
 ## Korepi 破解
 
-(动漫游戏 v4.6.0)
+(动漫游戏 v4.7.0)
 (从 https://github.com/fadillzzz/korepi-tools 魔改)
 
 Korepi 离线验证已移除。
