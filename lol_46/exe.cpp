@@ -113,13 +113,13 @@ size_t performHandler(void* a1) {
     if (fakeResp == true) {
         fakeResp = false;
         Callback((char*)aggregated.c_str(), aggregated.size(), 1, userData);
-        std::cout << "Faking md5c response" << std::endl;
+        std::cout << "[Crack] Faking md5c response" << std::endl;
     }
 
     if (fakeRespVerInfo == true) {
         fakeRespVerInfo = false;
         Callback((char*)versionInfoAggregated.c_str(), versionInfoAggregated.size(), 1, userData);
-        std::cout << "Faking version info response" << std::endl;
+        std::cout << "[Crack] Faking version info response" << std::endl;
     }
     return 0;
 }
