@@ -33,11 +33,11 @@ callback_t Callback = nullptr;
 void options(void *a1, size_t a2, void *a3) {
 	if (a2 == 10002) {
         if (memcmp(a3, "https://md5c.", 13) == 0) {
-            std::cout << "Fake md5c response triggered" << std::endl;
+            std::cout << "[Crack] Fake md5c response triggered" << std::endl;
             fakeResp = true;
         }
         if (memcmp(a3, "https://ghp.535888", 18) == 0) {
-            std::cout << "Fake version info response triggered" << std::endl;
+            std::cout << "[Crack] Fake version info response triggered" << std::endl;
             fakeRespVerInfo = true;
         }
     }
@@ -198,7 +198,6 @@ void start() {
             "48 89 5C 24 10 48 89 74 24 18 48 89 7C 24 20 55 41 54 41 55 41 56 41 57 48 8D 6C 24 C9 48 81 EC C0");
 
         if (found != nullptr) {
-            std::cout << found << std::endl;
             MH_CreateHook((LPVOID)found, hwid, (LPVOID *)&oHwid);
             MH_EnableHook((LPVOID)found);
         }
