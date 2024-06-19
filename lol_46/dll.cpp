@@ -29,15 +29,27 @@ size_t copy(void *a1, const char *a2) {
 }
 
 bool fakeResp = false;
+void* userData;
+typedef size_t(*callback_t)(char* ptr, size_t size, size_t nmemb, void* userdata);
+callback_t callback = nullptr;
+
 
 typedef void (*options_t)(void *, size_t, void *);
 options_t oOptions = nullptr;
 
-void options(void *a1, size_t a2, void *a3) {
+void options(void* a1, size_t a2, void* a3) {
     if (a2 == 10002) {
         if (memcmp(a3, "https://md5c.", 13) == 0) {
             fakeResp = true;
         }
+    }
+
+    if (a2 == 10001) {
+        userData = a3;
+    }
+
+    if (a2 == 20011) {
+        callback = (callback_t)a3;
     }
 
     oOptions(a1, a2, a3);
@@ -46,7 +58,7 @@ void options(void *a1, size_t a2, void *a3) {
 typedef size_t (*respHandler_t)(void *, char *, size_t, uint64_t *, uint32_t *a5);
 respHandler_t oRespHandler = nullptr;
 
-const auto versionInfoResp = R"|({
+const std::string versionInfoResp = R"|({
     "msg": "success",
     "code": 200,
     "data": {
@@ -73,12 +85,8 @@ const auto versionInfoResp = R"|({
     },
     "sign2": "LQuoFI+EQmj+ET67geipuHkfY0OlqPjefO4JftDJEIGZbKhV66kl8RGB4ANTHARYjmCo9OokSqTzkRJMVFyb2hM/ichoegIDsuEFtTlkR3uBmZUI43kyOHOfIEh3EWOY689RXKDGpjd20EIHDQUw7dRiAwUah9HjZG/hit1gM71d0Eqd2juhP2lMsvMn2R/F3xemK+DfOLvddzhosZyRF3p2oDlgWS7y821qbch1aMBNMFqajCHc/C3sxgkIEglHajep4+UhOhxHpeDHEhn+OX33ULVNu/+6S0FVi8J39L/xua/ACfA57KfWdSidwAZYU5rtB/sM6piXhbNUGK2wdA=="
 })|";
-const auto versionInfoChunkLength = std::format("{:x}", strlen(versionInfoResp));
-const auto versionInfoFirstChunk = std::format("{}\r\n{}\r\n", versionInfoChunkLength, versionInfoResp);
-const auto versionInfoSecondChunk = std::format("0\r\n\r\n");
-const auto versionInfoAggregated = versionInfoFirstChunk + versionInfoSecondChunk;
 
-const auto resp = R"({
+const std::string resp = R"({
     "msg": "Hi there",
     "code": 200,
     "data": {
@@ -103,22 +111,22 @@ const auto resp = R"({
     "signature": "a5879201e7fb4e3064390fccb0d8bbcf628c70bb237843101f314710ebfa0adc",
     "sign2": "coUVZrl9x43Dql30LoOOpp/U7+gVb7298CeYu6uu8gT1RRxsf4jvyz/xQckiDWd5Sj43dl5AAzdmJGPPFtyQC3haU20H6v09C6whJqSwHDuizT+SW7VFZbWT3jhc+y1bgkYEhbyxHK9hkTGF8hlMk6HSkhAg1vl8t/E7ZcScmh22ZRYXMRijZEEPCgNbDTXDwySqdRnEaLc17z4uvGG/+B2C/60T4aH4VFnFjDyCuIlxCOgMOUM3QcXj0KZakmHxddURpAULfBi00LCamJlJIeUFbnlg3vcrNoCxD/jpHmdZn0jr30jXpgljhAb5AxsX1xwdF5wYROiJTWv6U6nm0A=="
 })";
-const auto chunkLength = std::format("{:x}", strlen(resp));
-const auto firstChunk = std::format("{}\r\n{}\r\n", chunkLength, resp);
-const auto secondChunk = std::format("0\r\n\r\n");
-const auto aggregated = firstChunk + secondChunk;
 
-size_t respHandler(void *a1, char *content, size_t length, uint64_t *a4, uint32_t *a5) {
+typedef size_t(*perform_t)(void*);
+perform_t oPerform = nullptr;
+
+size_t perform(void* a1) {
     if (fakeResp == true) {
         fakeResp = false;
-        memcpy(content, aggregated.c_str(), aggregated.size() + 1);
-        length = aggregated.size();
-    } else {
-        memcpy(content, versionInfoAggregated.c_str(), versionInfoAggregated.size() + 1);
-        length = versionInfoAggregated.size();
+        callback((char*)resp.c_str(), resp.size(), 1, userData);
+        return 0;
     }
-
-    return oRespHandler(a1, content, length, a4, a5);
+    else
+    {
+		callback((char*)versionInfoResp.c_str(), versionInfoResp.size(), 1, userData);
+		return 0;
+    }
+	return oPerform(a1);
 }
 
 void start() {
@@ -163,10 +171,10 @@ void start() {
     }
 
     {
-        const void *found = Sig::find(base, expectedRegion, "48 89 5C 24 20 56 57 41 54 41 55 41 56 48 83 EC 20");
+        const void* found = Sig::find(base, expectedRegion, "40 55 56 48 83 EC 38 48 8B F1 48 85 C9 75 0A 8D");
 
         if (found != nullptr) {
-            MH_CreateHook((LPVOID)found, (LPVOID)respHandler, (LPVOID *)&oRespHandler);
+            MH_CreateHook((LPVOID)found, perform, (LPVOID*)&oPerform);
             MH_EnableHook((LPVOID)found);
         }
     }

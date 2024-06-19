@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <format>
 #include <iostream>
+#include <thread>
 
 #include "MinHook.h"
 #include "Sig.hpp"
@@ -52,7 +53,7 @@ void options(void *a1, size_t a2, void *a3) {
 	oOptions(a1, a2, a3);
 }
 
-const auto versionInfoResp = R"|({
+const std::string versionInfoResp = R"|({
     "msg": "success",
     "code": 200,
     "data": {
@@ -80,9 +81,8 @@ const auto versionInfoResp = R"|({
     "sign2": "V4XAGPDh0GCOquiQyLUsTE90voX23qkYZbwc+Pa0qhMAWtKxYozxA/aE0U6BcXk502nZSrtHAXLh3ucIDFUuNX/T9uR+NpJmOirHbAJcH6z/xpzxywCVoGaFdchQ64A0RcxphpTI4bCeCr4mgXYXbIdGWd7+y6hpQ1qGcn9en0Oh9ULG11nL4iC0c4tK6N0zQLYSxmz8dOrhwg4CIkcRxx7Yht+1w/PEo0rR0GkKN3mONibiow2Bv8oSvev4vc0xvNZQ2gdPYzNxfg6ueCv4MXLDffzJ0nCrl8+xVwQs4mYLTYsovfBB/41kNbBoYGbzyTS+HesxTqsuDpU+1/oByg=="
 }
 )|";
-const auto versionInfoAggregated = std::string(versionInfoResp);
 
-const auto resp = R"({
+const std::string resp = R"({
     "msg": "Hi there",
     "code": 200,
     "data": {
@@ -107,21 +107,36 @@ const auto resp = R"({
     "signature": "a5879201e7fb4e3064390fccb0d8bbcf628c70bb237843101f314710ebfa0adc",
     "sign2": "coUVZrl9x43Dql30LoOOpp/U7+gVb7298CeYu6uu8gT1RRxsf4jvyz/xQckiDWd5Sj43dl5AAzdmJGPPFtyQC3haU20H6v09C6whJqSwHDuizT+SW7VFZbWT3jhc+y1bgkYEhbyxHK9hkTGF8hlMk6HSkhAg1vl8t/E7ZcScmh22ZRYXMRijZEEPCgNbDTXDwySqdRnEaLc17z4uvGG/+B2C/60T4aH4VFnFjDyCuIlxCOgMOUM3QcXj0KZakmHxddURpAULfBi00LCamJlJIeUFbnlg3vcrNoCxD/jpHmdZn0jr30jXpgljhAb5AxsX1xwdF5wYROiJTWv6U6nm0A=="
 })";
-const auto aggregated = std::string(resp);
 
 size_t performHandler(void* a1) {
     if (fakeResp == true) {
         fakeResp = false;
-        Callback((char*)aggregated.c_str(), aggregated.size(), 1, userData);
+        Callback((char*)resp.c_str(), resp.size(), 1, userData);
         std::cout << "[Crack] Faking md5c response" << std::endl;
     }
 
     if (fakeRespVerInfo == true) {
         fakeRespVerInfo = false;
-        Callback((char*)versionInfoAggregated.c_str(), versionInfoAggregated.size(), 1, userData);
+        Callback((char*)versionInfoResp.c_str(), versionInfoResp.size(), 1, userData);
         std::cout << "[Crack] Faking version info response" << std::endl;
     }
     return 0;
+}
+
+int connectWrite() { return 1; }
+
+const std::string readResponse =
+R"(HTTP/1.1 200 OK
+Content-Length: 64
+Connection: close
+
+{"api":"time","code":"1","currentTime": 1718762445577,"msg":""})";
+size_t readIdx = 0;
+int read(void* a1, void* buf, int numBytes) {
+    const auto ret = readResponse.substr(readIdx, numBytes);
+    memcpy(buf, ret.c_str(), ret.size());
+    readIdx += ret.size();
+    return ret.size();
 }
 
 typedef HANDLE(WINAPI *CreateRemoteThreadEx_t)(HANDLE, LPSECURITY_ATTRIBUTES, SIZE_T, LPTHREAD_START_ROUTINE, LPVOID,
@@ -167,65 +182,111 @@ HANDLE WINAPI createThread(HANDLE hProcess, LPSECURITY_ATTRIBUTES lpThreadAttrib
                                  dwCreationFlags, lpAttributeList, lpThreadId);
 }
 
-void start() {
-    std::cout << "[Crack] Crack loaded, waiting for unpack..." << std::endl;
-    const auto ntdll = GetModuleHandle(L"ntdll.dll");
-    uint8_t callcode = ((uint8_t *)GetProcAddress(ntdll, "NtQuerySection"))[4] - 1;
-    uint8_t restore[] = {0x4C, 0x8B, 0xD1, 0xB8, callcode};
-
-    volatile auto ntProtectVirtualMemory = (uint8_t *)GetProcAddress(ntdll, "NtProtectVirtualMemory");
-
-    while (true) {
-        if (ntProtectVirtualMemory[0] != 0x4C) {
-            DWORD oldProtect;
-            VirtualProtect((LPVOID)ntProtectVirtualMemory, sizeof(restore), PAGE_EXECUTE_READWRITE, &oldProtect);
-            memcpy(ntProtectVirtualMemory, restore, sizeof(restore));
-            VirtualProtect((LPVOID)ntProtectVirtualMemory, sizeof(restore), oldProtect, nullptr);
-
-            break;
-        }
-    }
-
-    MH_Initialize();
+void cont()
+{
     const auto exe = GetModuleHandle(nullptr);
     const auto header = (PIMAGE_DOS_HEADER)exe;
-    const auto nt = (PIMAGE_NT_HEADERS)((uint8_t *)exe + header->e_lfanew);
+    const auto nt = (PIMAGE_NT_HEADERS)((uint8_t*)exe + header->e_lfanew);
     const auto size = nt->OptionalHeader.SizeOfImage;
 
     {
-        const void *found = Sig::find(
+        const void* found = Sig::find(
             exe, size,
             "48 89 5C 24 10 48 89 74 24 18 48 89 7C 24 20 55 41 54 41 55 41 56 41 57 48 8D 6C 24 C9 48 81 EC C0");
 
         if (found != nullptr) {
-            MH_CreateHook((LPVOID)found, hwid, (LPVOID *)&oHwid);
+            MH_CreateHook((LPVOID)found, hwid, (LPVOID*)&oHwid);
             MH_EnableHook((LPVOID)found);
         }
     }
 
     {
-        const void *found = Sig::find(exe, size, "89 54 24 10 4C 89 44 24 18 4C 89 4C 24 20 48 83 EC 28 48 85 C9");
+        const void* found = Sig::find(exe, size, "89 54 24 10 4C 89 44 24 18 4C 89 4C 24 20 48 83 EC 28 48 85 C9");
 
         if (found != nullptr) {
-            MH_CreateHook((LPVOID)found, options, (LPVOID *)&oOptions);
+            MH_CreateHook((LPVOID)found, options, (LPVOID*)&oOptions);
             MH_EnableHook((LPVOID)found);
         }
     }
 
-	{
-        const void* found = Sig::find(exe, size, "40 55 56 48 83 EC 38 48  8B F1 48 85 C9 75 0A 8D");
+    {
+        const void* found = Sig::find(exe, size, "40 55 56 48 83 EC 38 48 8B F1 48 85 C9 75 0A 8D");
 
         if (found != nullptr) {
-            MH_CreateHook((LPVOID)found, performHandler,NULL);
+            MH_CreateHook((LPVOID)found, performHandler, NULL);
             MH_EnableHook((LPVOID)found);
         }
     }
-    
-	{
+
+    {
+        const void* found = Sig::find(exe, size, "40 53 B8 20 00 00 00 E8 64 6F 13 00 48 2B E0 48 83 79 30 00");
+
+        if (found != nullptr) {
+            MH_CreateHook((LPVOID)found, (LPVOID)connectWrite, nullptr);
+            MH_EnableHook((LPVOID)found);
+        }
+    }
+
+    {
+        const void* found =
+            Sig::find(exe, size, "B8 38 00 00 00 E8 96 55 13 00 48 2B E0 45 85 C0 79 2A BA D0 00 00 00");
+
+        if (found != nullptr) {
+            MH_CreateHook((LPVOID)found, (LPVOID)connectWrite, nullptr);
+            MH_EnableHook((LPVOID)found);
+        }
+    }
+
+    {
+        const void* found =
+            Sig::find(exe, size, "B8 38 00 00 00 E8 66 5B 13 00 48 2B E0 45 85 C0 79 2A BA DF 00 00 00");
+
+        if (found != nullptr) {
+            MH_CreateHook((LPVOID)found, (LPVOID)read, nullptr);
+            MH_EnableHook((LPVOID)found);
+        }
+    }
+
+    {
         const auto remoteThreadEx = GetProcAddress(GetModuleHandle(L"kernel32.dll"), "CreateRemoteThreadEx");
-        MH_CreateHook((LPVOID)remoteThreadEx, (LPVOID)createThread, (LPVOID *)&oCreateRemoteThreadEx);
-        MH_EnableHook((LPVOID)remoteThreadEx);
+    	auto res = MH_CreateHook((LPVOID)remoteThreadEx, (LPVOID)createThread, (LPVOID*)&oCreateRemoteThreadEx);
+        auto res1 = MH_EnableHook((LPVOID)remoteThreadEx);
     }
+}
+
+bool restored = false;
+typedef BOOL(WINAPI* WriteProcessMemory_t)(HANDLE, LPVOID, LPCVOID, SIZE_T, SIZE_T*);
+WriteProcessMemory_t oWriteProcessMemory = nullptr;
+BOOL WINAPI writeMem(HANDLE hProcess, LPVOID lpBaseAddress, LPCVOID lpBuffer, SIZE_T nSize,
+    SIZE_T* lpNumberOfBytesWritten) {
+    auto result = oWriteProcessMemory(hProcess, lpBaseAddress, lpBuffer, nSize, lpNumberOfBytesWritten);
+
+    const auto ntdll = GetModuleHandle(L"ntdll.dll");
+    uint8_t callcode = ((uint8_t*)GetProcAddress(ntdll, "NtQuerySection"))[4] - 1;
+    uint8_t restore[] = { 0x4C, 0x8B, 0xD1, 0xB8, callcode };
+
+    volatile auto ntProtectVirtualMemory = (uint8_t*)GetProcAddress(ntdll, "NtProtectVirtualMemory");
+
+    if (restored == false && ntProtectVirtualMemory == lpBaseAddress) {
+        DWORD oldProtect;
+        VirtualProtect((LPVOID)ntProtectVirtualMemory, sizeof(restore), PAGE_EXECUTE_READWRITE, &oldProtect);
+        memcpy(ntProtectVirtualMemory, restore, sizeof(restore));
+        VirtualProtect((LPVOID)ntProtectVirtualMemory, sizeof(restore), oldProtect, nullptr);
+
+        restored = true;
+
+        cont();
+    }
+
+    return result;
+}
+
+void start() {
+    std::cout << "[Crack] Crack loaded, waiting for unpack..." << std::endl;
+    MH_Initialize();
+
+    MH_CreateHook((LPVOID)WriteProcessMemory, (LPVOID)writeMem, (LPVOID*)&oWriteProcessMemory);
+    MH_EnableHook((LPVOID)WriteProcessMemory);
 }
 
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) {
